@@ -332,8 +332,9 @@ class XMLComparator:
                 pass
             
             if root1 is not None and root2 is not None:
-                # Generate annotated XML showing differences
-                annotated_xml = self._generate_annotated_xml(root1, root2, filename1, filename2)
+                # Generate annotated XML showing differences, passing original content to detect prefixes
+                annotated_xml = self._generate_annotated_xml(root1, root2, filename1, filename2, 
+                                                             content1, content2)
                 diff_content.extend(annotated_xml)
             else:
                 # Fallback to line-by-line diff for non-XML content
@@ -367,23 +368,72 @@ class XMLComparator:
         
         return differences
     
-    def _generate_annotated_xml(self, elem1, elem2, filename1, filename2, indent=0):
+    def _extract_tag_with_prefix(self, elem, content):
+        """Extract original tag name with prefix from source content"""
+        # Try to find the original tag in the source content
+        tag_name = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+        
+        # Search for the tag with potential prefix in the content
+        import re
+        # Match pattern like <prefix:tagname or <tagname
+        pattern = rf'<(\w+:)?{re.escape(tag_name)}[\s>]'
+        match = re.search(pattern, content)
+        
+        if match and match.group(1):
+            # Found with prefix
+            return match.group(1) + tag_name
+        return tag_name
+    
+    def _generate_annotated_xml(self, elem1, elem2, filename1, filename2, content1='', content2='', indent=0):
         """Generate annotated XML showing differences between two elements"""
         lines = []
         prefix = '  ' * indent
         
-        # Compare tags
-        if not self._tags_match(elem1.tag, elem2.tag):
-            lines.append(f'{prefix}[-] <{elem1.tag}> (from {filename1})')
-            lines.append(f'{prefix}[+] <{elem2.tag}> (from {filename2})')
-            return lines
+        # Extract clean tag names (remove namespace URIs but keep prefixes)
+        tag_name1_base = elem1.tag.split('}')[-1] if '}' in elem1.tag else elem1.tag
+        tag_name2_base = elem2.tag.split('}')[-1] if '}' in elem2.tag else elem2.tag
         
-        # Start tag with attributes
-        tag_name = elem1.tag.split('}')[-1] if '}' in elem1.tag else elem1.tag
+        # Try to extract original tag names with prefixes from content
+        if content1 and content2:
+            tag_name1 = self._extract_tag_with_prefix(elem1, content1)
+            tag_name2 = self._extract_tag_with_prefix(elem2, content2)
+        else:
+            tag_name1 = tag_name1_base
+            tag_name2 = tag_name2_base
+        
+        # Compare tags
+        tags_match = self._tags_match(elem1.tag, elem2.tag)
+        
+        if not tags_match:
+            if not self.ignore_tags:
+                # Check if one tag is included in the other (e.g., "user" in "ns:user")
+                local1 = tag_name1.split(':')[-1]
+                local2 = tag_name2.split(':')[-1]
+                
+                if local1 == local2 or local1 in tag_name2 or local2 in tag_name1:
+                    # Tags are related (one is included in the other), show as CHANGED
+                    lines.append(f'{prefix}[CHANGED] tag: <{tag_name1}> -> <{tag_name2}>')
+                    tag_display = tag_name1  # Use first tag for display
+                else:
+                    # Tags are completely different, show as removed/added
+                    lines.append(f'{prefix}[-] <{tag_name1}> (from {filename1})')
+                    lines.append(f'{prefix}[+] <{tag_name2}> (from {filename2})')
+                    return lines
+            # If ignore_tags is true, continue processing with mismatched tags
+        
+        # Determine tag display name
+        if not tags_match and not self.ignore_tags:
+            # Use the displayed name from the CHANGED annotation
+            tag_display = tag_name1
+        elif self.ignore_tags:
+            # Remove namespace prefix when ignoring tags
+            tag_display = tag_name1.split(':')[-1]
+        else:
+            tag_display = tag_name1
         
         # Compare attributes
         if elem1.attrib != elem2.attrib:
-            lines.append(f'{prefix}<{tag_name}>')
+            lines.append(f'{prefix}<{tag_display}>')
             
             # Show attribute differences
             all_attrs = set(elem1.attrib.keys()) | set(elem2.attrib.keys())
@@ -399,7 +449,7 @@ class XMLComparator:
                         lines.append(f'{prefix}  [CHANGED] {attr}: "{val1}" -> "{val2}"')
         else:
             attr_str = ''.join([f' {k}="{v}"' for k, v in elem1.attrib.items()])
-            lines.append(f'{prefix}<{tag_name}{attr_str}>')
+            lines.append(f'{prefix}<{tag_display}{attr_str}>')
         
         # Compare text content - preserve whitespace
         text1 = elem1.text or ''
@@ -433,17 +483,20 @@ class XMLComparator:
         max_children = max(len(children1), len(children2))
         for i in range(max_children):
             if i < len(children1) and i < len(children2):
-                # Both exist, recurse
-                lines.extend(self._generate_annotated_xml(children1[i], children2[i], filename1, filename2, indent + 1))
+                # Both exist, recurse - pass content for prefix detection
+                lines.extend(self._generate_annotated_xml(children1[i], children2[i], filename1, filename2, 
+                                                          content1, content2, indent + 1))
             elif i < len(children1):
                 # Only in elem1 (removed)
-                lines.append(f'{prefix}  [-] Child element removed: <{children1[i].tag}>')
+                child_tag = children1[i].tag.split('}')[-1] if '}' in children1[i].tag else children1[i].tag
+                lines.append(f'{prefix}  [-] Child element removed: <{child_tag}>')
             else:
                 # Only in elem2 (added)
-                lines.append(f'{prefix}  [+] Child element added: <{children2[i].tag}>')
+                child_tag = children2[i].tag.split('}')[-1] if '}' in children2[i].tag else children2[i].tag
+                lines.append(f'{prefix}  [+] Child element added: <{child_tag}>')
         
         # Close tag
-        lines.append(f'{prefix}</{tag_name}>')
+        lines.append(f'{prefix}</{tag_display}>')
         
         return lines
 
