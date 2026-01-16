@@ -161,15 +161,15 @@ class XMLComparator:
                 self.ignore_tags = False
 
     def normalize_xml(self, file_path):
-        """Normalize XML content for comparison"""
+        """Normalize XML content for comparison - preserves whitespace in values"""
         try:
             # Parse the XML file
             tree = ET.parse(file_path)
             root = tree.getroot()
             # Convert to string without XML declaration for comparison
+            # Do NOT strip to preserve whitespace differences
             content = ET.tostring(root, encoding='unicode', method='xml')
-            # Remove extra whitespace and normalize
-            return content.strip()
+            return content
         except Exception as e:
             # If XML parsing fails, read as raw text
             try:
@@ -178,7 +178,7 @@ class XMLComparator:
                     # Remove XML declaration if present for comparison
                     lines = content.split('\n')
                     filtered_lines = [line for line in lines if not line.strip().startswith('<?xml')]
-                    return '\n'.join(filtered_lines).strip()
+                    return '\n'.join(filtered_lines)
             except:
                 return ""
 
@@ -268,11 +268,14 @@ class XMLComparator:
         if elem1.attrib != elem2.attrib:
             differences.append(f"Different attributes at {current_path}: {elem1.attrib} != {elem2.attrib}")
         
-        # Compare text
-        text1 = (elem1.text or "").strip()
-        text2 = (elem2.text or "").strip()
+        # Compare text - preserve whitespace to detect spacing differences
+        text1 = elem1.text or ""
+        text2 = elem2.text or ""
         if text1 != text2:
-            differences.append(f"Different text at {current_path}: '{text1}' != '{text2}'")
+            # Show exact text with visible whitespace indicators
+            text1_repr = text1.replace(' ', '[SP]').replace('\n', '[NL]').replace('\t', '[TAB]')
+            text2_repr = text2.replace(' ', '[SP]').replace('\n', '[NL]').replace('\t', '[TAB]')
+            differences.append(f"Different text at {current_path}: '{text1_repr}' != '{text2_repr}'")
         
         # Compare children
         children1 = list(elem1)
@@ -398,19 +401,29 @@ class XMLComparator:
             attr_str = ''.join([f' {k}="{v}"' for k, v in elem1.attrib.items()])
             lines.append(f'{prefix}<{tag_name}{attr_str}>')
         
-        # Compare text content
-        text1 = (elem1.text or '').strip()
-        text2 = (elem2.text or '').strip()
-        if text1 or text2:
+        # Compare text content - preserve whitespace
+        text1 = elem1.text or ''
+        text2 = elem2.text or ''
+        
+        # Only show text if it's not just whitespace in both
+        has_content1 = text1.strip() != ''
+        has_content2 = text2.strip() != ''
+        
+        if has_content1 or has_content2:
             if text1 != text2:
-                if text1 and not text2:
-                    lines.append(f'{prefix}  [-] {text1}')
-                elif text2 and not text1:
-                    lines.append(f'{prefix}  [+] {text2}')
+                # Show whitespace differences clearly
+                text1_display = repr(text1) if ' ' in text1 or '\n' in text1 or '\t' in text1 else text1
+                text2_display = repr(text2) if ' ' in text2 or '\n' in text2 or '\t' in text2 else text2
+                
+                if has_content1 and not has_content2:
+                    lines.append(f'{prefix}  [-] {text1_display}')
+                elif has_content2 and not has_content1:
+                    lines.append(f'{prefix}  [+] {text2_display}')
                 else:
-                    lines.append(f'{prefix}  [CHANGED] "{text1}" -> "{text2}"')
-            else:
-                lines.append(f'{prefix}  {text1}')
+                    lines.append(f'{prefix}  [CHANGED] {text1_display} -> {text2_display}')
+            elif has_content1:  # Both have same content
+                text_display = repr(text1) if ' ' in text1 or '\n' in text1 or '\t' in text1 else text1
+                lines.append(f'{prefix}  {text_display}')
         
         # Compare children
         children1 = list(elem1)
