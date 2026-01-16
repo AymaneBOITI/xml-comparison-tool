@@ -163,13 +163,24 @@ class XMLComparator:
     def normalize_xml(self, file_path):
         """Normalize XML content for comparison"""
         try:
+            # Parse the XML file
             tree = ET.parse(file_path)
             root = tree.getroot()
-            return ET.tostring(root, encoding='unicode', method='xml')
+            # Convert to string without XML declaration for comparison
+            content = ET.tostring(root, encoding='unicode', method='xml')
+            # Remove extra whitespace and normalize
+            return content.strip()
         except Exception as e:
             # If XML parsing fails, read as raw text
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                return f.read()
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                    # Remove XML declaration if present for comparison
+                    lines = content.split('\n')
+                    filtered_lines = [line for line in lines if not line.strip().startswith('<?xml')]
+                    return '\n'.join(filtered_lines).strip()
+            except:
+                return ""
 
     def calculate_similarity(self, content1, content2):
         """Calculate similarity rate between two contents with high precision"""
@@ -182,9 +193,33 @@ class XMLComparator:
         differences = []
         
         try:
+            # Prepare content for parsing (remove XML declarations)
+            clean_content1 = content1
+            clean_content2 = content2
+            
+            # Remove XML declaration lines if present
+            if '<?xml' in clean_content1:
+                lines = clean_content1.split('\n')
+                clean_content1 = '\n'.join([line for line in lines if not line.strip().startswith('<?xml')])
+            if '<?xml' in clean_content2:
+                lines = clean_content2.split('\n')
+                clean_content2 = '\n'.join([line for line in lines if not line.strip().startswith('<?xml')])
+            
             # Parse both XML files
-            root1 = ET.fromstring(content1) if content1.startswith('<?xml') or content1.startswith('<') else None
-            root2 = ET.fromstring(content2) if content2.startswith('<?xml') or content2.startswith('<') else None
+            root1 = None
+            root2 = None
+            
+            try:
+                if clean_content1.strip().startswith('<'):
+                    root1 = ET.fromstring(clean_content1.strip())
+            except Exception as e:
+                pass
+            
+            try:
+                if clean_content2.strip().startswith('<'):
+                    root2 = ET.fromstring(clean_content2.strip())
+            except Exception as e:
+                pass
             
             if root1 is not None and root2 is not None:
                 # Structured XML comparison
@@ -266,9 +301,32 @@ class XMLComparator:
         differences = self.find_differences(content1, content2, filename1, filename2)
         
         try:
+            # Prepare content for parsing (remove XML declarations)
+            clean_content1 = content1
+            clean_content2 = content2
+            
+            if '<?xml' in clean_content1:
+                lines = clean_content1.split('\n')
+                clean_content1 = '\n'.join([line for line in lines if not line.strip().startswith('<?xml')])
+            if '<?xml' in clean_content2:
+                lines = clean_content2.split('\n')
+                clean_content2 = '\n'.join([line for line in lines if not line.strip().startswith('<?xml')])
+            
             # Try to parse as XML
-            root1 = ET.fromstring(content1) if content1.startswith('<?xml') or content1.startswith('<') else None
-            root2 = ET.fromstring(content2) if content2.startswith('<?xml') or content2.startswith('<') else None
+            root1 = None
+            root2 = None
+            
+            try:
+                if clean_content1.strip().startswith('<'):
+                    root1 = ET.fromstring(clean_content1.strip())
+            except:
+                pass
+            
+            try:
+                if clean_content2.strip().startswith('<'):
+                    root2 = ET.fromstring(clean_content2.strip())
+            except:
+                pass
             
             if root1 is not None and root2 is not None:
                 # Generate annotated XML showing differences
