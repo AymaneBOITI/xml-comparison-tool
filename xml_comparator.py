@@ -562,15 +562,28 @@ class XMLComparator:
                 children2_by_tag[local_tag] = []
             children2_by_tag[local_tag].append((idx, child))
         
-        # Get all unique tag names
-        all_tags = set(children1_by_tag.keys()) | set(children2_by_tag.keys())
+        # Get all unique tag names preserving order of first occurrence
+        all_tags_ordered = []
+        seen = set()
+        # First add tags from children1 in order
+        for idx, child in enumerate(children1):
+            local_tag = get_local_tag(child)
+            if local_tag not in seen:
+                all_tags_ordered.append(local_tag)
+                seen.add(local_tag)
+        # Then add any new tags from children2
+        for idx, child in enumerate(children2):
+            local_tag = get_local_tag(child)
+            if local_tag not in seen:
+                all_tags_ordered.append(local_tag)
+                seen.add(local_tag)
         
         # Track which children have been matched
         matched1 = set()
         matched2 = set()
         
-        # Process each tag type
-        for tag in sorted(all_tags):
+        # Process each tag type in order
+        for tag in all_tags_ordered:
             list1 = children1_by_tag.get(tag, [])
             list2 = children2_by_tag.get(tag, [])
             
