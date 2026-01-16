@@ -578,7 +578,9 @@ class XMLComparator:
                         child_tag = self._extract_tag_with_prefix(list2[i], content2)
                     lines.append(f'{prefix}  [+] Child element added: <{child_tag}>')
         
-        # Close tag
+        # Close tag - show change if tags are visually different
+        if show_tag_change:
+            lines.append(f'{prefix}[CHANGED] closing tag: </{tag_name1}> -> </{tag_name2}>')
         lines.append(f'{prefix}</{tag_display}>')
         
         return lines
