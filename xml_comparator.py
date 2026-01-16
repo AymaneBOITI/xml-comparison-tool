@@ -435,6 +435,7 @@ class XMLComparator:
         tags_match = self._tags_match(elem1.tag, elem2.tag)
         tags_are_similar = False  # Flag to track if tags are related
         show_tag_change = False  # Flag to show tag change annotation
+        show_tag_as_removed_added = False  # Flag for completely different tags
         
         # Check if tag names are visually different (one has prefix, other doesn't)
         tags_visually_different = tag_name1 != tag_name2
@@ -446,14 +447,14 @@ class XMLComparator:
                 local2 = tag_name2.split(':')[-1]
                 
                 if local1 == local2 or local1 in tag_name2 or local2 in tag_name1:
-                    # Tags are related (one is included in the other)
+                    # Tags are related (one is included in the other) - prefix change only
                     tags_are_similar = True
                     show_tag_change = tags_visually_different  # Show only if visually different
                 else:
-                    # Tags are completely different, show as removed/added and stop
-                    lines.append(f'{prefix}[-] <{tag_name1}> (from {filename1})')
-                    lines.append(f'{prefix}[+] <{tag_name2}> (from {filename2})')
-                    return lines
+                    # Tags are completely different (Document -> pacsument)
+                    # Show tag names as [-]/[+] but continue comparing content
+                    show_tag_as_removed_added = True
+                    tags_are_similar = True  # Continue comparing content
             # If ignore_tags is true, continue processing with mismatched tags as if they match
             else:
                 tags_are_similar = True
@@ -476,10 +477,13 @@ class XMLComparator:
         # Compare attributes
         if elem1.attrib != elem2.attrib:
             # Show tag change if applicable
-            if show_tag_change:
+            if show_tag_as_removed_added:
+                lines.append(f'{prefix}[-] <{tag_name1}>')
+                lines.append(f'{prefix}[+] <{tag_name2}>')
+            elif show_tag_change:
                 lines.append(f'{prefix}[CHANGED] tag: <{tag_name1}> -> <{tag_name2}>')
-            
-            lines.append(f'{prefix}<{tag_display}>')
+            else:
+                lines.append(f'{prefix}<{tag_display}>')
             
             # Show attribute differences
             all_attrs = set(elem1.attrib.keys()) | set(elem2.attrib.keys())
@@ -495,11 +499,17 @@ class XMLComparator:
                         lines.append(f'{prefix}  [CHANGED] {attr}: "{val1}" -> "{val2}"')
         else:
             # Show tag change if applicable
-            if show_tag_change:
+            if show_tag_as_removed_added:
+                attr_str = ''.join([f' {k}="{v}"' for k, v in elem1.attrib.items()])
+                lines.append(f'{prefix}[-] <{tag_name1}{attr_str}>')
+                lines.append(f'{prefix}[+] <{tag_name2}{attr_str}>')
+            elif show_tag_change:
                 lines.append(f'{prefix}[CHANGED] tag: <{tag_name1}> -> <{tag_name2}>')
-            
-            attr_str = ''.join([f' {k}="{v}"' for k, v in elem1.attrib.items()])
-            lines.append(f'{prefix}<{tag_display}{attr_str}>')
+                attr_str = ''.join([f' {k}="{v}"' for k, v in elem1.attrib.items()])
+                lines.append(f'{prefix}<{tag_display}{attr_str}>')
+            else:
+                attr_str = ''.join([f' {k}="{v}"' for k, v in elem1.attrib.items()])
+                lines.append(f'{prefix}<{tag_display}{attr_str}>')
         
         # Compare text content - preserve whitespace
         text1 = elem1.text or ''
@@ -525,7 +535,7 @@ class XMLComparator:
                 text_display = repr(text1) if ' ' in text1 or '\n' in text1 or '\t' in text1 else text1
                 lines.append(f'{prefix}  {text_display}')
         
-        # Compare children - MAP by tag name instead of position
+        # Compare children - HYBRID approach: map by tag name, but fall back to position for unmatched
         children1 = list(elem1)
         children2 = list(elem2)
         
@@ -537,21 +547,25 @@ class XMLComparator:
         
         # Build dictionaries mapping local tag names to elements
         children1_by_tag = {}
-        for child in children1:
+        for idx, child in enumerate(children1):
             local_tag = get_local_tag(child)
             if local_tag not in children1_by_tag:
                 children1_by_tag[local_tag] = []
-            children1_by_tag[local_tag].append(child)
+            children1_by_tag[local_tag].append((idx, child))
         
         children2_by_tag = {}
-        for child in children2:
+        for idx, child in enumerate(children2):
             local_tag = get_local_tag(child)
             if local_tag not in children2_by_tag:
                 children2_by_tag[local_tag] = []
-            children2_by_tag[local_tag].append(child)
+            children2_by_tag[local_tag].append((idx, child))
         
         # Get all unique tag names
         all_tags = set(children1_by_tag.keys()) | set(children2_by_tag.keys())
+        
+        # Track which children have been matched
+        matched1 = set()
+        matched2 = set()
         
         # Process each tag type
         for tag in sorted(all_tags):
@@ -562,26 +576,50 @@ class XMLComparator:
             max_count = max(len(list1), len(list2))
             for i in range(max_count):
                 if i < len(list1) and i < len(list2):
+                    idx1, child1 = list1[i]
+                    idx2, child2 = list2[i]
+                    matched1.add(idx1)
+                    matched2.add(idx2)
                     # Both exist, recurse - pass content for prefix detection
-                    lines.extend(self._generate_annotated_xml(list1[i], list2[i], filename1, filename2, 
+                    lines.extend(self._generate_annotated_xml(child1, child2, filename1, filename2, 
                                                               content1, content2, indent + 1))
-                elif i < len(list1):
-                    # Only in elem1 (removed)
-                    child_tag = list1[i].tag.split('}')[-1] if '}' in list1[i].tag else list1[i].tag
-                    if content1:
-                        child_tag = self._extract_tag_with_prefix(list1[i], content1)
-                    lines.append(f'{prefix}  [-] Child element removed: <{child_tag}>')
-                else:
-                    # Only in elem2 (added)
-                    child_tag = list2[i].tag.split('}')[-1] if '}' in list2[i].tag else list2[i].tag
-                    if content2:
-                        child_tag = self._extract_tag_with_prefix(list2[i], content2)
-                    lines.append(f'{prefix}  [+] Child element added: <{child_tag}>')
+                # Note: Don't handle unmatched here, we'll do positional matching later
+        
+        # Now handle unmatched children by position (for renamed tags like Document -> pacsument)
+        unmatched1 = [(idx, children1[idx]) for idx in range(len(children1)) if idx not in matched1]
+        unmatched2 = [(idx, children2[idx]) for idx in range(len(children2)) if idx not in matched2]
+        
+        # Match unmatched children by position
+        max_unmatched = max(len(unmatched1), len(unmatched2))
+        for i in range(max_unmatched):
+            if i < len(unmatched1) and i < len(unmatched2):
+                idx1, child1 = unmatched1[i]
+                idx2, child2 = unmatched2[i]
+                # Compare these elements even though their tags differ
+                lines.extend(self._generate_annotated_xml(child1, child2, filename1, filename2,
+                                                          content1, content2, indent + 1))
+            elif i < len(unmatched1):
+                idx1, child1 = unmatched1[i]
+                child_tag = child1.tag.split('}')[-1] if '}' in child1.tag else child1.tag
+                if content1:
+                    child_tag = self._extract_tag_with_prefix(child1, content1)
+                lines.append(f'{prefix}  [-] Child element removed: <{child_tag}>')
+            else:
+                idx2, child2 = unmatched2[i]
+                child_tag = child2.tag.split('}')[-1] if '}' in child2.tag else child2.tag
+                if content2:
+                    child_tag = self._extract_tag_with_prefix(child2, content2)
+                lines.append(f'{prefix}  [+] Child element added: <{child_tag}>')
         
         # Close tag - show change if tags are visually different
-        if show_tag_change:
+        if show_tag_as_removed_added:
+            lines.append(f'{prefix}[-] </{tag_name1}>')
+            lines.append(f'{prefix}[+] </{tag_name2}>')
+        elif show_tag_change:
             lines.append(f'{prefix}[CHANGED] closing tag: </{tag_name1}> -> </{tag_name2}>')
-        lines.append(f'{prefix}</{tag_display}>')
+            lines.append(f'{prefix}</{tag_display}>')
+        else:
+            lines.append(f'{prefix}</{tag_display}>')
         
         return lines
 
