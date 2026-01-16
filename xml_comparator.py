@@ -306,8 +306,12 @@ class XMLComparator:
         
         return differences
 
-    def create_diff_xml(self, content1, content2, filename1, filename2, match_num):
+    def create_diff_xml(self, content1, content2, filename1, filename2, match_num, original1=None, original2=None):
         """Create an XML file with inline diff annotations (git-style)"""
+        # Use original content for prefix detection if available
+        content_for_prefix1 = original1 if original1 else content1
+        content_for_prefix2 = original2 if original2 else content2
+        
         diff_content = []
         diff_content.append('<?xml version="1.0" encoding="UTF-8"?>')
         diff_content.append('<!-- DIFF COMPARISON -->')
@@ -364,7 +368,7 @@ class XMLComparator:
             if root1 is not None and root2 is not None:
                 # Generate annotated XML showing differences, passing original content to detect prefixes
                 annotated_xml = self._generate_annotated_xml(root1, root2, filename1, filename2, 
-                                                             content1, content2)
+                                                             content_for_prefix1, content_for_prefix2)
                 diff_content.extend(annotated_xml)
             else:
                 # Fallback to line-by-line diff for non-XML content
@@ -441,23 +445,21 @@ class XMLComparator:
         tags_visually_different = tag_name1 != tag_name2
         
         if not tags_match:
-            if not self.ignore_tags:
-                # Check if one tag is included in the other (e.g., "user" in "ns:user")
-                local1 = tag_name1.split(':')[-1]
-                local2 = tag_name2.split(':')[-1]
-                
-                if local1 == local2 or local1 in tag_name2 or local2 in tag_name1:
-                    # Tags are related (one is included in the other) - prefix change only
-                    tags_are_similar = True
-                    show_tag_change = tags_visually_different  # Show only if visually different
-                else:
-                    # Tags are completely different (Document -> pacsument)
-                    # Show tag names as [-]/[+] but continue comparing content
-                    show_tag_as_removed_added = True
-                    tags_are_similar = True  # Continue comparing content
-            # If ignore_tags is true, continue processing with mismatched tags as if they match
-            else:
+            # Check if one tag is included in the other (e.g., "user" in "ns:user")
+            local1 = tag_name1.split(':')[-1]
+            local2 = tag_name2.split(':')[-1]
+            
+            if local1 == local2 or local1 in tag_name2 or local2 in tag_name1:
+                # Tags are related (one is included in the other) - prefix change only
                 tags_are_similar = True
+                if not self.ignore_tags:
+                    show_tag_change = tags_visually_different  # Show only if visually different
+                # If ignore_tags is true, don't show prefix changes
+            else:
+                # Tags are completely different (Document -> pacsument)
+                # Show tag names as [-]/[+] even with ignore_tags=true
+                show_tag_as_removed_added = True
+                tags_are_similar = True  # Continue comparing content
         else:
             # Tags match semantically, but check if they're visually different
             if not self.ignore_tags and tags_visually_different:
@@ -651,6 +653,16 @@ class XMLComparator:
         
         folder1_contents = {}
         folder2_contents = {}
+        folder1_original = {}  # Store original content for prefix detection
+        folder2_original = {}
+        
+        # Read original contents first
+        for f in folder1_files:
+            with open(f, 'r', encoding='utf-8') as file:
+                folder1_original[f] = file.read()
+        for f in folder2_files:
+            with open(f, 'r', encoding='utf-8') as file:
+                folder2_original[f] = file.read()
         
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
             # Submit all normalization tasks
@@ -730,7 +742,9 @@ class XMLComparator:
                         folder2_contents[file2],
                         file1.name,
                         file2.name,
-                        match_num
+                        match_num,
+                        folder1_original[file1],
+                        folder2_original[file2]
                     )
                 else:
                     differences = []
