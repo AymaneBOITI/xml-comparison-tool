@@ -436,6 +436,9 @@ class XMLComparator:
         tags_are_similar = False  # Flag to track if tags are related
         show_tag_change = False  # Flag to show tag change annotation
         
+        # Check if tag names are visually different (one has prefix, other doesn't)
+        tags_visually_different = tag_name1 != tag_name2
+        
         if not tags_match:
             if not self.ignore_tags:
                 # Check if one tag is included in the other (e.g., "user" in "ns:user")
@@ -445,7 +448,7 @@ class XMLComparator:
                 if local1 == local2 or local1 in tag_name2 or local2 in tag_name1:
                     # Tags are related (one is included in the other)
                     tags_are_similar = True
-                    show_tag_change = True
+                    show_tag_change = tags_visually_different  # Show only if visually different
                 else:
                     # Tags are completely different, show as removed/added and stop
                     lines.append(f'{prefix}[-] <{tag_name1}> (from {filename1})')
@@ -454,6 +457,10 @@ class XMLComparator:
             # If ignore_tags is true, continue processing with mismatched tags as if they match
             else:
                 tags_are_similar = True
+        else:
+            # Tags match semantically, but check if they're visually different
+            if not self.ignore_tags and tags_visually_different:
+                show_tag_change = True
         
         # Determine tag display name
         if tags_are_similar or not tags_match:
