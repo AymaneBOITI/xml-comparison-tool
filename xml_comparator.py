@@ -488,25 +488,58 @@ class XMLComparator:
                 text_display = repr(text1) if ' ' in text1 or '\n' in text1 or '\t' in text1 else text1
                 lines.append(f'{prefix}  {text_display}')
         
-        # Compare children
+        # Compare children - MAP by tag name instead of position
         children1 = list(elem1)
         children2 = list(elem2)
         
-        # Simple matching: process in parallel
-        max_children = max(len(children1), len(children2))
-        for i in range(max_children):
-            if i < len(children1) and i < len(children2):
-                # Both exist, recurse - pass content for prefix detection
-                lines.extend(self._generate_annotated_xml(children1[i], children2[i], filename1, filename2, 
-                                                          content1, content2, indent + 1))
-            elif i < len(children1):
-                # Only in elem1 (removed)
-                child_tag = children1[i].tag.split('}')[-1] if '}' in children1[i].tag else children1[i].tag
-                lines.append(f'{prefix}  [-] Child element removed: <{child_tag}>')
-            else:
-                # Only in elem2 (added)
-                child_tag = children2[i].tag.split('}')[-1] if '}' in children2[i].tag else children2[i].tag
-                lines.append(f'{prefix}  [+] Child element added: <{child_tag}>')
+        # Create mapping of children by local tag name
+        def get_local_tag(elem):
+            """Extract local tag name without namespace"""
+            tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+            return tag.split(':')[-1]  # Also remove prefix like ns:
+        
+        # Build dictionaries mapping local tag names to elements
+        children1_by_tag = {}
+        for child in children1:
+            local_tag = get_local_tag(child)
+            if local_tag not in children1_by_tag:
+                children1_by_tag[local_tag] = []
+            children1_by_tag[local_tag].append(child)
+        
+        children2_by_tag = {}
+        for child in children2:
+            local_tag = get_local_tag(child)
+            if local_tag not in children2_by_tag:
+                children2_by_tag[local_tag] = []
+            children2_by_tag[local_tag].append(child)
+        
+        # Get all unique tag names
+        all_tags = set(children1_by_tag.keys()) | set(children2_by_tag.keys())
+        
+        # Process each tag type
+        for tag in sorted(all_tags):
+            list1 = children1_by_tag.get(tag, [])
+            list2 = children2_by_tag.get(tag, [])
+            
+            # Match elements pairwise
+            max_count = max(len(list1), len(list2))
+            for i in range(max_count):
+                if i < len(list1) and i < len(list2):
+                    # Both exist, recurse - pass content for prefix detection
+                    lines.extend(self._generate_annotated_xml(list1[i], list2[i], filename1, filename2, 
+                                                              content1, content2, indent + 1))
+                elif i < len(list1):
+                    # Only in elem1 (removed)
+                    child_tag = list1[i].tag.split('}')[-1] if '}' in list1[i].tag else list1[i].tag
+                    if content1:
+                        child_tag = self._extract_tag_with_prefix(list1[i], content1)
+                    lines.append(f'{prefix}  [-] Child element removed: <{child_tag}>')
+                else:
+                    # Only in elem2 (added)
+                    child_tag = list2[i].tag.split('}')[-1] if '}' in list2[i].tag else list2[i].tag
+                    if content2:
+                        child_tag = self._extract_tag_with_prefix(list2[i], content2)
+                    lines.append(f'{prefix}  [+] Child element added: <{child_tag}>')
         
         # Close tag
         lines.append(f'{prefix}</{tag_display}>')
