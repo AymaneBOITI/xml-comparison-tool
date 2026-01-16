@@ -403,6 +403,8 @@ class XMLComparator:
         
         # Compare tags
         tags_match = self._tags_match(elem1.tag, elem2.tag)
+        tags_are_similar = False  # Flag to track if tags are related
+        show_tag_change = False  # Flag to show tag change annotation
         
         if not tags_match:
             if not self.ignore_tags:
@@ -411,28 +413,35 @@ class XMLComparator:
                 local2 = tag_name2.split(':')[-1]
                 
                 if local1 == local2 or local1 in tag_name2 or local2 in tag_name1:
-                    # Tags are related (one is included in the other), show as CHANGED
-                    lines.append(f'{prefix}[CHANGED] tag: <{tag_name1}> -> <{tag_name2}>')
-                    tag_display = tag_name1  # Use first tag for display
+                    # Tags are related (one is included in the other)
+                    tags_are_similar = True
+                    show_tag_change = True
                 else:
-                    # Tags are completely different, show as removed/added
+                    # Tags are completely different, show as removed/added and stop
                     lines.append(f'{prefix}[-] <{tag_name1}> (from {filename1})')
                     lines.append(f'{prefix}[+] <{tag_name2}> (from {filename2})')
                     return lines
-            # If ignore_tags is true, continue processing with mismatched tags
+            # If ignore_tags is true, continue processing with mismatched tags as if they match
+            else:
+                tags_are_similar = True
         
         # Determine tag display name
-        if not tags_match and not self.ignore_tags:
-            # Use the displayed name from the CHANGED annotation
-            tag_display = tag_name1
-        elif self.ignore_tags:
-            # Remove namespace prefix when ignoring tags
-            tag_display = tag_name1.split(':')[-1]
+        if tags_are_similar or not tags_match:
+            if self.ignore_tags:
+                # Remove namespace prefix when ignoring tags
+                tag_display = tag_name1.split(':')[-1]
+            else:
+                # Use first tag name, but we'll show the change
+                tag_display = tag_name1.split(':')[-1] if ':' in tag_name1 else tag_name1
         else:
             tag_display = tag_name1
         
         # Compare attributes
         if elem1.attrib != elem2.attrib:
+            # Show tag change if applicable
+            if show_tag_change:
+                lines.append(f'{prefix}[CHANGED] tag: <{tag_name1}> -> <{tag_name2}>')
+            
             lines.append(f'{prefix}<{tag_display}>')
             
             # Show attribute differences
@@ -448,6 +457,10 @@ class XMLComparator:
                     else:
                         lines.append(f'{prefix}  [CHANGED] {attr}: "{val1}" -> "{val2}"')
         else:
+            # Show tag change if applicable
+            if show_tag_change:
+                lines.append(f'{prefix}[CHANGED] tag: <{tag_name1}> -> <{tag_name2}>')
+            
             attr_str = ''.join([f' {k}="{v}"' for k, v in elem1.attrib.items()])
             lines.append(f'{prefix}<{tag_display}{attr_str}>')
         
